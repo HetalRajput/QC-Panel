@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { io } from "socket.io-client";
-import { FaSort, FaSortUp, FaSortDown, FaTimes } from 'react-icons/fa';
+import { FaSort, FaSortUp, FaSortDown, FaTimes, FaFileExcel } from 'react-icons/fa';
+import * as XLSX from 'xlsx';
 
 const VerifyListener = ({ csvData }) => {
   // State management
@@ -70,22 +71,20 @@ const VerifyListener = ({ csvData }) => {
         setProducts(prev => {
           const productKey = `${product.item || product.item_code || product.code}_${
             product.Batch || product.batch
-          }`;
+          }_${data.success ? 'verified' : 'failed'}`;
           
           const existingProductIndex = prev.findIndex(p => {
-            const pKey = `${p.item || p.item_code || p.code}_${p.Batch || p.batch}`;
+            const pKey = `${p.item || p.item_code || p.code}_${p.Batch || p.batch}_${p.status}`;
             return pKey === productKey;
           });
           
+          // If product exists with same status, update quantity
           if (existingProductIndex >= 0) {
             const updatedProducts = [...prev];
             const existingProduct = updatedProducts[existingProductIndex];
             
-            // Remove the existing product
-            updatedProducts.splice(existingProductIndex, 1);
-            
-            const status = data.success ? 'verified' : 'failed';
-            const newProduct = {
+            // Update the existing product
+            updatedProducts[existingProductIndex] = {
               ...existingProduct,
               ...product,
               timestamp: new Date().toISOString(),
@@ -94,25 +93,28 @@ const VerifyListener = ({ csvData }) => {
               message: data.success ? 'Verified' : 'Failed',
               mismatches: data.mismatches,
               quantity: (existingProduct.quantity || 0) + 1,
-              status: status,
-              source: 'realtime' // Track source of data
+              status: data.success ? 'verified' : 'failed',
+              source: 'realtime'
             };
             
-            // Add new product at the beginning
-            return [newProduct, ...updatedProducts].slice(0, 50);
-          } else {
+            // Move updated product to the beginning
+            const updatedProduct = updatedProducts.splice(existingProductIndex, 1)[0];
+            return [updatedProduct, ...updatedProducts].slice(0, 50);
+          } 
+          // If product doesn't exist, create a new entry
+          else {
             const status = data.success ? 'verified' : 'failed';
             const formattedData = {
               ...product,
               timestamp: new Date().toISOString(),
-              id: Date.now(),
+              id: Date.now() + Math.random(),
               success: data.success,
               similarity: data.similarity,
               message: data.success ? 'Verified' : 'Failed',
               mismatches: data.mismatches,
               quantity: 1,
               status: status,
-              source: 'realtime' // Track source of data
+              source: 'realtime'
             };
             
             // Add new product at the beginning
@@ -147,6 +149,55 @@ const VerifyListener = ({ csvData }) => {
     setShowErrorPopup(false);
     setError(null);
   }, []);
+
+  // Download all products (both verified and failed) as Excel
+  const downloadExcel = useCallback(() => {
+    try {
+      // Filter verified and failed products (exclude not_uploaded)
+      const exportProducts = products.filter(product => 
+        product.status === 'verified' || product.status === 'failed'
+      );
+      
+      if (exportProducts.length === 0) {
+        setError("No products to download");
+        setShowErrorPopup(true);
+        return;
+      }
+
+      // Prepare data for Excel
+      const excelData = exportProducts.map(product => ({
+        'Timestamp': new Date(product.timestamp).toLocaleString(),
+        'Item Code': product.item || product.item_code || product.code || "N/A",
+        'Product Name': product.name || "Unknown Product",
+        'Batch': product.Batch || product.batch || "N/A",
+        'MRP': `₹${parseFloat(product.Mrp || product.mrp || 0).toFixed(2)}`,
+        'Expiry': product.Expiry || product.expiry || product.EXPIRY || "N/A",
+        'Pack': product.Pack || product.pack || "N/A",
+        'Quantity': product.quantity || 0,
+        'Status': product.status === 'verified' ? 'Verified' : 'Failed',
+        'Similarity': product.similarity ? `${(product.similarity * 100).toFixed(2)}%` : "N/A",
+        'Mismatches': product.mismatches ? JSON.stringify(product.mismatches) : "N/A",
+        'Message': product.message || "N/A",
+        'Source': product.source || "N/A"
+      }));
+
+      // Create workbook and worksheet
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(excelData);
+      
+      // Add worksheet to workbook
+      XLSX.utils.book_append_sheet(wb, ws, "All Products");
+      
+      // Generate Excel file and trigger download
+      const fileName = `product_verification_${new Date().toISOString().split('T')[0]}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+      
+    } catch (err) {
+      console.error("Error generating Excel file:", err);
+      setError("Failed to generate Excel file");
+      setShowErrorPopup(true);
+    }
+  }, [products]);
 
   // Sorting logic
   const sortedProducts = React.useMemo(() => {
@@ -286,6 +337,14 @@ const VerifyListener = ({ csvData }) => {
             </p>
           </div>
           <div className="flex items-center space-x-4">
+            <button
+              onClick={downloadExcel}
+              className="flex items-center bg-green-600 text-white px-3 py-2 rounded-md hover:bg-green-700 transition-colors"
+              title="Download all products as Excel"
+            >
+              <FaFileExcel className="mr-2" />
+              Export Excel
+            </button>
             <span className={`px-3 py-1 rounded-full text-sm font-medium ${
               connectionStatus === "connected"
                 ? "bg-green-100 text-green-800"
