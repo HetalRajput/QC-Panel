@@ -15,7 +15,7 @@ function CsvViewer() {
   const [error, setError] = useState(null);
   const [apiResults, setApiResults] = useState([]);
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const fixedFields = ['item', 'name', 'batch', 'mrp', 'pack', 'Expiry'];
+  const fixedFields = ['item', 'name', 'batch', 'mrp', 'pack', 'Expiry', 'quantity','freequantity'];
   // Search functionality states
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -155,7 +155,12 @@ function CsvViewer() {
         const mappedRow = {};
         fixedFields.forEach(fixedField => {
           const csvField = fieldMap[fixedField];
-          mappedRow[fixedField] = csvField ? (row[csvField] || '') : '';
+          // Handle quantity field specifically to ensure it's a number
+          if (fixedField === 'quantity' || fixedField === 'freequantity') {
+            mappedRow[fixedField] = csvField ? (parseInt(row[csvField]) || 0) : 0;
+          } else {
+            mappedRow[fixedField] = csvField ? (row[csvField] || '') : '';
+          }
         });
         return mappedRow;
       }).filter(row => Object.values(row).some(v => v !== ''));
@@ -231,7 +236,7 @@ function CsvViewer() {
           <div className="p-4 overflow-y-auto">
             {/* Search Section */}
             <div className="mb-6">
-              <h3 className="text-lg font-semibold mb-2">Customer Search</h3>
+              <h3 className="text-lg font-semibold mb-2">Supplier Search</h3>
               <div className="relative search-container">
                 <div className="flex items-center border border-gray-300 rounded-md overflow-hidden">
                   <input

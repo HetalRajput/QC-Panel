@@ -1,9 +1,11 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { io } from "socket.io-client";
-import { FaSort, FaSortUp, FaSortDown, FaTimes, FaFileExcel } from 'react-icons/fa';
+import { FaSort, FaSortUp, FaSortDown, FaTimes, FaFileExcel, FaExclamationTriangle } from 'react-icons/fa';
 import * as XLSX from 'xlsx';
 
 const VerifyListener = ({ csvData }) => {
+  console.log("CSV Data received>>>>>>>>>>>>>>>>:", csvData);
+  
   // State management
   const [connectionStatus, setConnectionStatus] = useState("disconnected");
   const [products, setProducts] = useState([]); // Combined products
@@ -11,6 +13,7 @@ const VerifyListener = ({ csvData }) => {
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'none' });
   const [error, setError] = useState(null);
   const [showErrorPopup, setShowErrorPopup] = useState(false);
+  const [overQuantityProduct, setOverQuantityProduct] = useState(null);
 
   // Initialize with CSV data if provided
   useEffect(() => {
@@ -23,13 +26,51 @@ const VerifyListener = ({ csvData }) => {
         similarity: 0,
         message: 'Not Uploaded',
         mismatches: null,
-        quantity: 0,
+        scanned_quantity: 0,
         status: 'not_uploaded',
         source: 'csv' // Track source of data
       }));
       setProducts(initialProducts);
     }
   }, [csvData]);
+
+  // Check if scanned quantity exceeds allowed quantity (quantity + freequantity) for the same item code
+  const checkQuantityExceeded = useCallback((products, itemCode, newScannedQuantity) => {
+    // Find the CSV product to get the allowed quantity
+    const csvProduct = products.find(p => 
+      (p.item_code || p.item || p.code) === itemCode && p.source === 'csv'
+    );
+    
+    if (!csvProduct) return false;
+    
+    // Calculate total scanned quantity for this item code across all statuses
+    const totalScanned = products
+      .filter(p => (p.item_code || p.item || p.code) === itemCode && p.source !== 'csv')
+      .reduce((sum, p) => sum + (p.scanned_quantity || 0), 0);
+    
+    const totalAllowed = (csvProduct.quantity || 0) + (csvProduct.freequantity || 0);
+    
+    // Check if adding the new quantity would exceed the limit
+    return (totalScanned + newScannedQuantity) > totalAllowed;
+  }, []);
+
+  // Get total scanned quantity for an item code
+  const getTotalScannedQuantity = useCallback((products, itemCode) => {
+    return products
+      .filter(p => (p.item_code || p.item || p.code) === itemCode && p.source !== 'csv')
+      .reduce((sum, p) => sum + (p.scanned_quantity || 0), 0);
+  }, []);
+
+  // Get allowed quantity for an item code
+  const getAllowedQuantity = useCallback((products, itemCode) => {
+    const csvProduct = products.find(p => 
+      (p.item_code || p.item || p.code) === itemCode && p.source === 'csv'
+    );
+    
+    if (!csvProduct) return 0;
+    
+    return (csvProduct.quantity || 0) + (csvProduct.freequantity || 0);
+  }, []);
 
   // Handle socket connection and messages
   useEffect(() => {
@@ -69,16 +110,34 @@ const VerifyListener = ({ csvData }) => {
         }
 
         setProducts(prev => {
-          const productKey = `${product.item || product.item_code || product.code}_${
+          const itemCode = product.item || product.item_code || product.code;
+          const productKey = `${itemCode}_${
             product.Batch || product.batch
           }_${data.success ? 'verified' : 'failed'}`;
+          
+          // Check if adding this product would exceed the allowed quantity
+          const quantityExceeded = checkQuantityExceeded(prev, itemCode, 1);
+          
+          if (quantityExceeded) {
+            const csvProduct = prev.find(p => 
+              (p.item_code || p.item || p.code) === itemCode && p.source === 'csv'
+            );
+            
+            setOverQuantityProduct({
+              ...product,
+              quantity: csvProduct?.quantity || 0,
+              freequantity: csvProduct?.freequantity || 0,
+              scanned_quantity: getTotalScannedQuantity(prev, itemCode) + 1
+            });
+            return prev; // Don't update if quantity is exceeded
+          }
           
           const existingProductIndex = prev.findIndex(p => {
             const pKey = `${p.item || p.item_code || p.code}_${p.Batch || p.batch}_${p.status}`;
             return pKey === productKey;
           });
           
-          // If product exists with same status, update quantity
+          // If product exists with same status, update scanned quantity
           if (existingProductIndex >= 0) {
             const updatedProducts = [...prev];
             const existingProduct = updatedProducts[existingProductIndex];
@@ -92,7 +151,7 @@ const VerifyListener = ({ csvData }) => {
               similarity: data.similarity,
               message: data.success ? 'Verified' : 'Failed',
               mismatches: data.mismatches,
-              quantity: (existingProduct.quantity || 0) + 1,
+              scanned_quantity: (existingProduct.scanned_quantity || 0) + 1,
               status: data.success ? 'verified' : 'failed',
               source: 'realtime'
             };
@@ -104,15 +163,23 @@ const VerifyListener = ({ csvData }) => {
           // If product doesn't exist, create a new entry
           else {
             const status = data.success ? 'verified' : 'failed';
+            
+            // Find the original CSV product to get quantity and freequantity
+            const csvProduct = prev.find(p => 
+              (p.item_code || p.item || p.code) === itemCode && p.source === 'csv'
+            );
+            
             const formattedData = {
               ...product,
+              quantity: csvProduct ? csvProduct.quantity : 0,
+              freequantity: csvProduct ? csvProduct.freequantity : 0,
               timestamp: new Date().toISOString(),
               id: Date.now() + Math.random(),
               success: data.success,
               similarity: data.similarity,
               message: data.success ? 'Verified' : 'Failed',
               mismatches: data.mismatches,
-              quantity: 1,
+              scanned_quantity: 1,
               status: status,
               source: 'realtime'
             };
@@ -142,12 +209,17 @@ const VerifyListener = ({ csvData }) => {
       newSocket.off("product_verified", handleProductVerified);
       newSocket.disconnect();
     };
-  }, []);
+  }, [checkQuantityExceeded, getTotalScannedQuantity]);
 
   // Close error popup
   const closeErrorPopup = useCallback(() => {
     setShowErrorPopup(false);
     setError(null);
+  }, []);
+
+  // Close over quantity popup
+  const closeOverQuantityPopup = useCallback(() => {
+    setOverQuantityProduct(null);
   }, []);
 
   // Download all products (both verified and failed) as Excel
@@ -174,6 +246,8 @@ const VerifyListener = ({ csvData }) => {
         'Expiry': product.Expiry || product.expiry || product.EXPIRY || "N/A",
         'Pack': product.Pack || product.pack || "N/A",
         'Quantity': product.quantity || 0,
+        'Free Quantity': product.freequantity || 0,
+        'Scanned Quantity': product.scanned_quantity || 0,
         'Status': product.status === 'verified' ? 'Verified' : 'Failed',
         'Similarity': product.similarity ? `${(product.similarity * 100).toFixed(2)}%` : "N/A",
         'Mismatches': product.mismatches ? JSON.stringify(product.mismatches) : "N/A",
@@ -220,10 +294,14 @@ const VerifyListener = ({ csvData }) => {
       const aValue = sortConfig.key === 'similarity' ? (a.similarity || 0) :
                    sortConfig.key === 'Mrp' ? parseFloat(a.Mrp || a.mrp || 0) :
                    sortConfig.key === 'quantity' ? (a.quantity || 0) :
+                   sortConfig.key === 'freequantity' ? (a.freequantity || 0) :
+                   sortConfig.key === 'scanned_quantity' ? (a.scanned_quantity || 0) :
                    a[sortConfig.key];
       const bValue = sortConfig.key === 'similarity' ? (b.similarity || 0) :
                    sortConfig.key === 'Mrp' ? parseFloat(b.Mrp || b.mrp || 0) :
                    sortConfig.key === 'quantity' ? (b.quantity || 0) :
+                   sortConfig.key === 'freequantity' ? (b.freequantity || 0) :
+                   sortConfig.key === 'scanned_quantity' ? (b.scanned_quantity || 0) :
                    b[sortConfig.key];
 
       if (aValue < bValue) {
@@ -281,6 +359,15 @@ const VerifyListener = ({ csvData }) => {
     return "text-red-600";
   };
 
+  // Check if quantity is exceeded for a product
+  const isQuantityExceeded = (product) => {
+    const itemCode = product.item || product.item_code || product.code;
+    const totalScanned = getTotalScannedQuantity(products, itemCode);
+    const allowed = getAllowedQuantity(products, itemCode);
+    
+    return totalScanned > allowed;
+  };
+
   // Table configuration
   const tableFields = [
     { key: 'timestamp', label: 'Timestamp', width: 'w-40' },
@@ -291,6 +378,8 @@ const VerifyListener = ({ csvData }) => {
     { key: 'Expiry', label: 'Expiry', width: 'w-24' },
     { key: 'pack', label: 'Pack', width: 'w-24' },
     { key: 'quantity', label: 'Qty', width: 'w-16' },
+    { key: 'freequantity', label: 'Free Qty', width: 'w-20' },
+    { key: 'scanned_quantity', label: 'Scanned Qty', width: 'w-24' },
     { key: 'status', label: 'Status', width: 'w-24' },
     { key: 'similarity', label: 'Similarity', width: 'w-24' },
     { key: 'details', label: 'Details', width: 'w-64' }
@@ -321,6 +410,57 @@ const VerifyListener = ({ csvData }) => {
                 className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
               >
                 OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Over Quantity Popup */}
+      {overQuantityProduct && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-start mb-4">
+              <h3 className="text-lg font-bold text-yellow-600 flex items-center">
+                <FaExclamationTriangle className="mr-2" />
+                Quantity Exceeded
+              </h3>
+              <button 
+                onClick={closeOverQuantityPopup}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <FaTimes />
+              </button>
+            </div>
+            <div className="mb-4">
+              <p className="text-yellow-700 font-medium">
+                Scanned quantity exceeds allowed limit for:
+              </p>
+              <div className="mt-2 p-3 bg-yellow-50 rounded-md">
+                <p className="font-semibold">{overQuantityProduct.name}</p>
+                <p className="text-sm">Item Code: {overQuantityProduct.item || overQuantityProduct.item_code || overQuantityProduct.code || "N/A"}</p>
+                <p className="text-sm">Batch: {overQuantityProduct.Batch || overQuantityProduct.batch || "N/A"}</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <div>
+                    <p className="text-xs text-gray-500">Allowed Quantity:</p>
+                    <p className="font-bold">{(overQuantityProduct.quantity || 0) + (overQuantityProduct.freequantity || 0)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500">Total Scanned Quantity:</p>
+                    <p className="font-bold text-red-600">{overQuantityProduct.scanned_quantity}</p>
+                  </div>
+                </div>
+              </div>
+              <p className="mt-3 text-sm text-gray-600">
+                Please verify the quantity or contact supervisor.
+              </p>
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={closeOverQuantityPopup}
+                className="px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+              >
+                Acknowledge
               </button>
             </div>
           </div>
@@ -381,14 +521,18 @@ const VerifyListener = ({ csvData }) => {
                 sortedProducts.map((product) => {
                   const status = getStatusBadge(product);
                   const similarity = product.similarity || 0;
+                  const quantityExceeded = isQuantityExceeded(product);
+                  const itemCode = product.item || product.item_code || product.code;
+                  const totalScanned = getTotalScannedQuantity(products, itemCode);
+                  const allowed = getAllowedQuantity(products, itemCode);
 
                   return (
-                    <tr key={product.id} className="hover:bg-gray-50">
+                    <tr key={product.id} className={`hover:bg-gray-50 ${quantityExceeded ? 'bg-yellow-50' : ''}`}>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {new Date(product.timestamp).toLocaleTimeString()}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {product.item || product.item_code || product.code || "N/A"}
+                        {itemCode || "N/A"}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-900">
                         <div className="line-clamp-2">
@@ -407,8 +551,24 @@ const VerifyListener = ({ csvData }) => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {product.Pack || product.pack || "N/A"}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {product.quantity}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                        {product.quantity || 0}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                        {product.freequantity || 0}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-center font-medium">
+                        <div className={`${quantityExceeded ? 'text-red-600' : 'text-gray-500'}`}>
+                          {product.scanned_quantity || 0}
+                          {quantityExceeded && (
+                            <FaExclamationTriangle className="inline-block ml-1 text-yellow-500" title="Quantity exceeded" />
+                          )}
+                          {product.source !== 'csv' && (
+                            <div className="text-xs text-gray-400 mt-1">
+                              Total: {totalScanned}/{allowed}
+                            </div>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${status.class}`}>
@@ -475,6 +635,10 @@ const VerifyListener = ({ csvData }) => {
               <div className="flex items-center">
                 <span className="w-3 h-3 bg-gray-100 rounded-full mr-2 border border-gray-500"></span>
                 <span className="text-xs">Not Uploaded</span>
+              </div>
+              <div className="flex items-center">
+                <span className="w-3 h-3 bg-yellow-100 rounded-full mr-2 border border-yellow-500"></span>
+                <span className="text-xs">Quantity Exceeded</span>
               </div>
             </div>
           </div>

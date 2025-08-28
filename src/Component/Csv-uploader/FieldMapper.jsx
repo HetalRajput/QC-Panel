@@ -41,7 +41,9 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
               'Batch': 'batch',
               'MRP': 'mrp',
               'Pack': 'pack',
-              'Expiry': 'Expiry'
+              'Expiry': 'Expiry',
+              'Quantity': 'quantity',
+              'Fquantity': 'freequantity'
             };
 
             // Apply the mapped columns to the fieldMap
@@ -123,6 +125,8 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
       setApiError(null);
       
       // Prepare the data for the insert API call
+      console.log('Field Map before saving >>>>>>>>>>>>>>:', fieldMap);
+      
       const mappingData = {
         SuppCode: SelectedCustomer?.VCode || "",
         Code: fieldMap['item'] || "",
@@ -130,10 +134,13 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
         Batch: fieldMap['batch'] || "",
         MRP: fieldMap['mrp'] || "",
         Expiry: fieldMap['Expiry'] || "",
-        Pack: fieldMap['pack'] || ""
+        Pack: fieldMap['pack'] || "",
+        Quantity: fieldMap['quantity'] || "",
+        Fquantity: fieldMap['freequantity'] || "",  // Changed from fieldMap['fquantity']
       };
 
-      console.log('Saving mapping data:', mappingData);
+
+      console.log('Saving mapping data<<<<<<<<<<<<<<<<<:', mappingData);
       
       // Call the insert API
       const response = await axios.post(
