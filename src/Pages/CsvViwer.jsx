@@ -15,7 +15,7 @@ function CsvViewer() {
   const [error, setError] = useState(null);
   const [apiResults, setApiResults] = useState([]);
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const fixedFields = ['item', 'name', 'batch', 'mrp', 'pack', 'Expiry', 'quantity','freequantity','Vno','CGST','SGST','IGST','HSNCODE','FTRate','SRate','DIS','Scm1','Scm2','ScmPer'];
+  const fixedFields = ['item', 'name', 'batch', 'mrp', 'pack', 'Expiry', 'quantity', 'freequantity', 'Vno', 'CGST', 'SGST', 'IGST', 'HSNCODE', 'FTRate', 'SRate', 'DIS', 'Scm1', 'Scm2', 'ScmPer'];
   // Search functionality states
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -78,13 +78,13 @@ function CsvViewer() {
     setIsSearching(true);
     try {
       const response = await fetch(`http://jemapps.in/api/ocr/search-customer/${encodeURIComponent(query)}`);
-      
+
       if (!response.ok) {
         throw new Error('Failed to fetch search results');
       }
       const data = await response.json();
       console.log('Search results:', data);
-      
+
       setSearchResults(data);
       setShowDropdown(true);
     } catch (err) {
@@ -156,7 +156,8 @@ function CsvViewer() {
         fixedFields.forEach(fixedField => {
           const csvField = fieldMap[fixedField];
           // Handle quantity field specifically to ensure it's a number
-      if (fixedField === 'quantity' || fixedField === 'freequantity' || fixedField === 'Vno' || fixedField === 'CGST' || fixedField === 'SGST' || fixedField === 'IGST' || fixedField === 'FTRate' || fixedField === 'SRate' || fixedField === 'DIS' || fixedField === 'Scm1' || fixedField === 'Scm2' || fixedField === 'ScmPer') {            mappedRow[fixedField] = csvField ? (parseInt(row[csvField]) || 0) : 0;
+          if (fixedField === 'quantity' || fixedField === 'freequantity' || fixedField === 'Vno' || fixedField === 'CGST' || fixedField === 'SGST' || fixedField === 'IGST' || fixedField === 'FTRate' || fixedField === 'SRate' || fixedField === 'DIS' || fixedField === 'Scm1' || fixedField === 'Scm2' || fixedField === 'ScmPer') {
+            mappedRow[fixedField] = csvField ? (parseInt(row[csvField]) || 0) : 0;
           } else {
             mappedRow[fixedField] = csvField ? (row[csvField] || '') : '';
           }
@@ -255,12 +256,12 @@ function CsvViewer() {
                     {isSearching ? '...' : <FaSearch />}
                   </button>
                 </div>
-                
+
                 {/* Search Results Dropdown */}
                 {showDropdown && searchResults.length > 0 && (
                   <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
                     {searchResults.map((customer) => (
-                      <div 
+                      <div
                         key={customer.VCode}
                         className="px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
                         onClick={() => handleCustomerSelect(customer)}
@@ -272,7 +273,7 @@ function CsvViewer() {
                   </div>
                 )}
               </div>
-              
+
               {/* Selected Customer Display */}
               {selectedCustomer && (
                 <div className="mt-3 p-3 bg-blue-50 rounded-md">
@@ -435,7 +436,7 @@ function CsvViewer() {
           {isLoading ? (
             <div className="text-center text-gray-500 mt-10">Matching items...</div>
           ) : apiResults.length > 0 ? (
-            <MatchResults csvData={mappedData} />
+            <MatchResults csvData={mappedData} selectedCustomer={selectedCustomer} />
           ) : (
             <div className="text-center text-gray-500 mt-10">
               {mappedData.length > 0 ? 'No match results yet' : 'Process a CSV file to see matches'}
