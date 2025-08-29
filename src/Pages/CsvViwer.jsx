@@ -15,7 +15,7 @@ function CsvViewer() {
   const [error, setError] = useState(null);
   const [apiResults, setApiResults] = useState([]);
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const fixedFields = ['item', 'name', 'batch', 'mrp', 'pack', 'Expiry', 'quantity','freequantity'];
+  const fixedFields = ['item', 'name', 'batch', 'mrp', 'pack', 'Expiry', 'quantity','freequantity','Vno','CGST','SGST','IGST','HSNCODE','FTRate','SRate','DIS','Scm1','Scm2','ScmPer'];
   // Search functionality states
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -156,8 +156,7 @@ function CsvViewer() {
         fixedFields.forEach(fixedField => {
           const csvField = fieldMap[fixedField];
           // Handle quantity field specifically to ensure it's a number
-          if (fixedField === 'quantity' || fixedField === 'freequantity') {
-            mappedRow[fixedField] = csvField ? (parseInt(row[csvField]) || 0) : 0;
+      if (fixedField === 'quantity' || fixedField === 'freequantity' || fixedField === 'Vno' || fixedField === 'CGST' || fixedField === 'SGST' || fixedField === 'IGST' || fixedField === 'FTRate' || fixedField === 'SRate' || fixedField === 'DIS' || fixedField === 'Scm1' || fixedField === 'Scm2' || fixedField === 'ScmPer') {            mappedRow[fixedField] = csvField ? (parseInt(row[csvField]) || 0) : 0;
           } else {
             mappedRow[fixedField] = csvField ? (row[csvField] || '') : '';
           }

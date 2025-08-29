@@ -43,7 +43,18 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
               'Pack': 'pack',
               'Expiry': 'Expiry',
               'Quantity': 'quantity',
-              'Fquantity': 'freequantity'
+              'Fquantity': 'freequantity',
+              'Vno': 'Vno',
+              'CGST': 'CGST',
+              'SGST': 'SGST',
+              'IGST': 'IGST',
+              'HSNCODE': 'HSNCODE',
+              'FTRate': 'FTRate',
+              'SRate': 'SRate',
+              'DIS': 'DIS',
+              'Scm1': 'Scm1',
+              'Scm2': 'Scm2',
+              'ScmPer': 'ScmPer'
             };
 
             // Apply the mapped columns to the fieldMap
@@ -127,18 +138,38 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
       // Prepare the data for the insert API call
       console.log('Field Map before saving >>>>>>>>>>>>>>:', fieldMap);
       
-      const mappingData = {
-        SuppCode: SelectedCustomer?.VCode || "",
-        Code: fieldMap['item'] || "",
-        Name: fieldMap['name'] || "",
-        Batch: fieldMap['batch'] || "",
-        MRP: fieldMap['mrp'] || "",
-        Expiry: fieldMap['Expiry'] || "",
-        Pack: fieldMap['pack'] || "",
-        Quantity: fieldMap['quantity'] || "",
-        Fquantity: fieldMap['freequantity'] || "",  // Changed from fieldMap['fquantity']
+      // Create reverse mapping from our field names to API field names
+      const reverseFieldMapping = {
+        'item': 'Code',
+        'name': 'Name',
+        'batch': 'Batch',
+        'mrp': 'MRP',
+        'pack': 'Pack',
+        'Expiry': 'Expiry',
+        'quantity': 'Quantity',
+        'freequantity': 'Fquantity',
+        'Vno': 'Vno',
+        'CGST': 'CGST',
+        'SGST': 'SGST',
+        'IGST': 'IGST',
+        'HSNCODE': 'HSNCODE',
+        'FTRate': 'FTRate',
+        'SRate': 'SRate',
+        'DIS': 'DIS',
+        'Scm1': 'Scm1',
+        'Scm2': 'Scm2',
+        'ScmPer': 'ScmPer'
       };
 
+      const mappingData = { SuppCode: SelectedCustomer?.VCode || "" };
+   
+      // Map all fields to the API format
+      Object.entries(fieldMap).forEach(([ourField, column]) => {
+        const apiField = reverseFieldMapping[ourField];
+        if (apiField) {
+          mappingData[apiField] = column || "";
+        }
+      });
 
       console.log('Saving mapping data<<<<<<<<<<<<<<<<<:', mappingData);
       
@@ -210,7 +241,6 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
           <div key={field} className="flex items-center justify-between">
             <label className="w-1/4 text-sm font-medium text-gray-700 capitalize">
               {field.replace('_', ' ')}
-              {field === 'Expiry'}
             </label>
             <div className="relative w-3/4">
               <select
@@ -220,7 +250,7 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
                 onKeyDown={(e) => handleKeyDown(e, field, index)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               >
-                <option value="">-- Select {field === 'Expiry' || ''} --</option>
+                <option value="">-- Select {field} --</option>
                 {csvHeaders.map((header) => (
                   <option key={header} value={header}>
                     {header}

@@ -1,10 +1,9 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { io } from "socket.io-client";
-import { FaSort, FaSortUp, FaSortDown, FaTimes, FaFileExcel, FaExclamationTriangle } from 'react-icons/fa';
+import { FaSort, FaSortUp, FaSortDown, FaTimes, FaFileExcel, FaExclamationTriangle, FaDownload } from 'react-icons/fa';
 import * as XLSX from 'xlsx';
-
+import axios from 'axios';
 const VerifyListener = ({ csvData }) => {
-  console.log("CSV Data received>>>>>>>>>>>>>>>>:", csvData);
   
   // State management
   const [connectionStatus, setConnectionStatus] = useState("disconnected");
@@ -14,6 +13,7 @@ const VerifyListener = ({ csvData }) => {
   const [error, setError] = useState(null);
   const [showErrorPopup, setShowErrorPopup] = useState(false);
   const [overQuantityProduct, setOverQuantityProduct] = useState(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Initialize with CSV data if provided
   useEffect(() => {
@@ -132,60 +132,137 @@ const VerifyListener = ({ csvData }) => {
             return prev; // Don't update if quantity is exceeded
           }
           
-          const existingProductIndex = prev.findIndex(p => {
-            const pKey = `${p.item || p.item_code || p.code}_${p.Batch || p.batch}_${p.status}`;
-            return pKey === productKey;
-          });
-          
-          // If product exists with same status, update scanned quantity
-          if (existingProductIndex >= 0) {
-            const updatedProducts = [...prev];
-            const existingProduct = updatedProducts[existingProductIndex];
+          // If product is verified, create a single entry
+          if (data.success) {
+            const existingProductIndex = prev.findIndex(p => {
+              const pKey = `${p.item || p.item_code || p.code}_${p.Batch || p.batch}_${p.status}`;
+              return pKey === productKey;
+            });
             
-            // Update the existing product
-            updatedProducts[existingProductIndex] = {
-              ...existingProduct,
-              ...product,
-              timestamp: new Date().toISOString(),
-              success: data.success,
-              similarity: data.similarity,
-              message: data.success ? 'Verified' : 'Failed',
-              mismatches: data.mismatches,
-              scanned_quantity: (existingProduct.scanned_quantity || 0) + 1,
-              status: data.success ? 'verified' : 'failed',
-              source: 'realtime'
-            };
-            
-            // Move updated product to the beginning
-            const updatedProduct = updatedProducts.splice(existingProductIndex, 1)[0];
-            return [updatedProduct, ...updatedProducts].slice(0, 50);
+            // If product exists with same status, update scanned quantity
+            if (existingProductIndex >= 0) {
+              const updatedProducts = [...prev];
+              const existingProduct = updatedProducts[existingProductIndex];
+              
+              // Update the existing product
+              updatedProducts[existingProductIndex] = {
+                ...existingProduct,
+                ...product,
+                timestamp: new Date().toISOString(),
+                success: data.success,
+                similarity: data.similarity,
+                message: data.success ? 'Verified' : 'Failed',
+                mismatches: data.mismatches,
+                scanned_quantity: (existingProduct.scanned_quantity || 0) + 1,
+                status: data.success ? 'verified' : 'failed',
+                source: 'realtime'
+              };
+              
+              // Move updated product to the beginning
+              const updatedProduct = updatedProducts.splice(existingProductIndex, 1)[0];
+              return [updatedProduct, ...updatedProducts].slice(0, 50);
+            } 
+            // If product doesn't exist, create a new entry
+            else {
+              const status = data.success ? 'verified' : 'failed';
+              
+              // Find the original CSV product to get quantity and freequantity
+              const csvProduct = prev.find(p => 
+                (p.item_code || p.item || p.code) === itemCode && p.source === 'csv'
+              );
+              
+              const formattedData = {
+                ...product,
+                quantity: csvProduct ? csvProduct.quantity : 0,
+                freequantity: csvProduct ? csvProduct.freequantity : 0,
+                timestamp: new Date().toISOString(),
+                id: Date.now() + Math.random(),
+                success: data.success,
+                similarity: data.similarity,
+                message: data.success ? 'Verified' : 'Failed',
+                mismatches: data.mismatches,
+                scanned_quantity: 1,
+                status: status,
+                source: 'realtime'
+              };
+              
+              // Add new product at the beginning
+              return [formattedData, ...prev].slice(0, 50);
+            }
           } 
-          // If product doesn't exist, create a new entry
+          // If product failed, create multiple entries for each mismatch reason
           else {
-            const status = data.success ? 'verified' : 'failed';
+            const newProducts = [];
+            const timestamp = new Date().toISOString();
             
             // Find the original CSV product to get quantity and freequantity
             const csvProduct = prev.find(p => 
               (p.item_code || p.item || p.code) === itemCode && p.source === 'csv'
             );
             
-            const formattedData = {
-              ...product,
-              quantity: csvProduct ? csvProduct.quantity : 0,
-              freequantity: csvProduct ? csvProduct.freequantity : 0,
-              timestamp: new Date().toISOString(),
-              id: Date.now() + Math.random(),
-              success: data.success,
-              similarity: data.similarity,
-              message: data.success ? 'Verified' : 'Failed',
-              mismatches: data.mismatches,
-              scanned_quantity: 1,
-              status: status,
-              source: 'realtime'
-            };
+            // Create a separate entry for each mismatch
+            if (data.mismatches) {
+              Object.entries(data.mismatches).forEach(([reason, details]) => {
+                const mismatchId = `${itemCode}_${product.Batch || product.batch}_${reason}`;
+                
+                // Check if this specific mismatch already exists
+                const existingMismatchIndex = prev.findIndex(p => 
+                  p.id === mismatchId && p.status === 'failed'
+                );
+                
+                if (existingMismatchIndex >= 0) {
+                  // Update existing mismatch entry
+                  const updatedProducts = [...prev];
+                  const existingProduct = updatedProducts[existingMismatchIndex];
+                  
+                  updatedProducts[existingMismatchIndex] = {
+                    ...existingProduct,
+                    timestamp: timestamp,
+                    scanned_quantity: (existingProduct.scanned_quantity || 0) + 1,
+                    message: `Failed: ${reason} mismatch`
+                  };
+                  
+                  newProducts.push(updatedProducts[existingMismatchIndex]);
+                } else {
+                  // Create new mismatch entry
+                  newProducts.push({
+                    ...product,
+                    quantity: csvProduct ? csvProduct.quantity : 0,
+                    freequantity: csvProduct ? csvProduct.freequantity : 0,
+                    timestamp: timestamp,
+                    id: mismatchId,
+                    success: false,
+                    similarity: data.similarity,
+                    message: `Failed: ${reason} mismatch`,
+                    mismatches: { [reason]: details },
+                    scanned_quantity: 1,
+                    status: 'failed',
+                    source: 'realtime',
+                    failureReason: reason
+                  });
+                }
+              });
+            } else {
+              // If no specific mismatches, create a general failed entry
+              newProducts.push({
+                ...product,
+                quantity: csvProduct ? csvProduct.quantity : 0,
+                freequantity: csvProduct ? csvProduct.freequantity : 0,
+                timestamp: timestamp,
+                id: `${itemCode}_${product.Batch || product.batch}_general`,
+                success: false,
+                similarity: data.similarity,
+                message: 'Failed: General mismatch',
+                mismatches: data.mismatches,
+                scanned_quantity: 1,
+                status: 'failed',
+                source: 'realtime',
+                failureReason: 'general'
+              });
+            }
             
-            // Add new product at the beginning
-            return [formattedData, ...prev].slice(0, 50);
+            // Add new products at the beginning and limit to 50 entries
+            return [...newProducts, ...prev].slice(0, 50);
           }
         });
       } catch (err) {
@@ -248,11 +325,14 @@ const VerifyListener = ({ csvData }) => {
         'Quantity': product.quantity || 0,
         'Free Quantity': product.freequantity || 0,
         'Scanned Quantity': product.scanned_quantity || 0,
+        'Vno':product.Vno,
         'Status': product.status === 'verified' ? 'Verified' : 'Failed',
+        'Failure Reason': product.failureReason || (product.status === 'failed' ? 'General' : 'N/A'),
         'Similarity': product.similarity ? `${(product.similarity * 100).toFixed(2)}%` : "N/A",
         'Mismatches': product.mismatches ? JSON.stringify(product.mismatches) : "N/A",
         'Message': product.message || "N/A",
         'Source': product.source || "N/A"
+
       }));
 
       // Create workbook and worksheet
@@ -270,6 +350,98 @@ const VerifyListener = ({ csvData }) => {
       console.error("Error generating Excel file:", err);
       setError("Failed to generate Excel file");
       setShowErrorPopup(true);
+    }
+  }, [products]);
+
+  // Export report to server API
+  const exportReportToServer = useCallback(async () => {
+    try {
+      setIsExporting(true);
+      
+      // Filter verified and failed products (exclude not_uploaded)
+      const exportProducts = products.filter(product => 
+        product.status === 'verified' || product.status === 'failed'
+      );
+      
+      if (exportProducts.length === 0) {
+        setError("No products to export");
+        setShowErrorPopup(true);
+        setIsExporting(false);
+        return;
+      }
+console.log("Exporting products: >>>>>", exportProducts);
+
+          
+
+      // Format data according to the required API structure
+      const reportData = exportProducts.map(product => ({
+        BillNo: product.BillNo || "N/A",
+        CGST: product.CGST || "0",
+        Discount: product.Discount || "0",
+        Expiry: product.Expiry || product.expiry || product.EXPIRY || "N/A",
+        FTrate: product.FTrate || "0",
+        HSNCode: product.HSNCode || "N/A",
+        IGST: product.IGST || "0",
+        SGST: product.SGST || "0",
+        SRate: product.SRate || "0",
+        Scm1: product.Scm1 || "0",
+        Scm2: product.Scm2 || "0",
+        ScmPer: product.ScmPer || "0",
+        batch: product.Batch || product.batch || "N/A",
+        freequantity: product.freequantity || 0,
+        item: product.item || product.item_code || product.code || "N/A",
+        mrp: product.Mrp || product.mrp || "0",
+        name: product.name || "Unknown Product",
+        pack: product.Pack || product.pack || "N/A",
+        quantity: product.quantity || 0,
+        SuppCode: product.SuppCode || "N/A",
+        Vno: product.Vno || "N/A"
+      }));
+        
+
+      console.log("Report data to be sent:", reportData);
+
+      // Call the API
+      const response = await axios('http://jemapps.in/api/ocr/generate-easysol-report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        dataArray: JSON.stringify(reportData),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      }
+
+      // Get the blob from the response
+      const blob = await response.blob();
+      
+      // Create a download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      
+      // Generate filename with current date
+      const date = new Date().toISOString().split('T')[0];
+      a.download = `easysol-report-${date}.xlsx`;
+      
+      document.body.appendChild(a);
+      a.click();
+      
+      // Clean up
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      console.log('Report exported successfully');
+      
+    } catch (err) {
+      console.error("Error exporting report:", err);
+      setError("Failed to export report: " + err.message);
+      setShowErrorPopup(true);
+    } finally {
+      setIsExporting(false);
     }
   }, [products]);
 
@@ -484,6 +656,24 @@ const VerifyListener = ({ csvData }) => {
             >
               <FaFileExcel className="mr-2" />
               Export Excel
+            </button>
+            <button
+              onClick={exportReportToServer}
+              disabled={isExporting}
+              className="flex items-center bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-blue-700 transition-colors disabled:bg-blue-400 disabled:cursor-not-allowed"
+              title="Export report to server"
+            >
+              {isExporting ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  <FaDownload className="mr-2" />
+                  Export Report
+                </>
+              )}
             </button>
             <span className={`px-3 py-1 rounded-full text-sm font-medium ${
               connectionStatus === "connected"
