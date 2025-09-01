@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { io } from "socket.io-client";
 import { FaSort, FaSortUp, FaSortDown, FaTimes, FaFileExcel, FaExclamationTriangle, FaDownload } from 'react-icons/fa';
 import * as XLSX from 'xlsx';
 import axios from 'axios';
+import { initializeSocket, getSocket, disconnectSocket } from '../../Utility/ConnectionService'
+
 const VerifyListener = ({ csvData, selectedCustomer }) => {
-  console.log(" this is csv data >>>>>>>>>>>>>>>>>>>>>>>>>>", csvData);
 
   // State management
   const [connectionStatus, setConnectionStatus] = useState("disconnected");
@@ -15,6 +15,16 @@ const VerifyListener = ({ csvData, selectedCustomer }) => {
   const [showErrorPopup, setShowErrorPopup] = useState(false);
   const [overQuantityProduct, setOverQuantityProduct] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [token ,setToken] = useState('');
+  
+ 
+    useEffect(() => {
+      const storedToken = localStorage.getItem("token");
+      
+      if (storedToken) {
+        setToken(storedToken);
+      }
+    }, []);
 
   // Initialize with CSV data if provided
   useEffect(() => {
@@ -73,13 +83,15 @@ const VerifyListener = ({ csvData, selectedCustomer }) => {
     return (csvProduct.quantity || 0) + (csvProduct.freequantity || 0);
   }, []);
 
+   
+
+
+    
   // Handle socket connection and messages
   useEffect(() => {
-    const newSocket = io("http://192.168.1.110:6500", {
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-    });
+    if (!token) return; // Don't initialize socket until token is available
 
+    const newSocket = initializeSocket(token);
     setSocket(newSocket);
 
     const handleConnect = () => {
@@ -284,9 +296,9 @@ const VerifyListener = ({ csvData, selectedCustomer }) => {
       newSocket.off("disconnect", handleDisconnect);
       newSocket.off("connect_error", handleConnectError);
       newSocket.off("product_verified", handleProductVerified);
-      newSocket.disconnect();
+      // Don't disconnect socket here as it's managed by the service
     };
-  }, [checkQuantityExceeded, getTotalScannedQuantity]);
+  }, [checkQuantityExceeded, getTotalScannedQuantity, token]);
 
   // Close error popup
   const closeErrorPopup = useCallback(() => {
@@ -300,216 +312,175 @@ const VerifyListener = ({ csvData, selectedCustomer }) => {
   }, []);
 
   // Download all products (both verified and failed) as Excel
-  const downloadExcel = useCallback(() => {
+
+
+  // Export report to server API - Fixed to handle CSV response
+  const exportReportToServer = useCallback(async () => {
     try {
+      setIsExporting(true);
+
       // Filter verified and failed products (exclude not_uploaded)
       const exportProducts = products.filter(product =>
         product.status === 'verified' || product.status === 'failed'
       );
 
       if (exportProducts.length === 0) {
-        setError("No products to download");
+        setError("No products to export");
         setShowErrorPopup(true);
+        setIsExporting(false);
         return;
       }
 
-      // Prepare data for Excel
-      const excelData = exportProducts.map(product => ({
-        'Timestamp': new Date(product.timestamp).toLocaleString(),
-        'Item Code': product.item || product.item_code || product.code || "N/A",
-        'Product Name': product.name || "Unknown Product",
-        'Batch': product.Batch || product.batch || "N/A",
-        'MRP': `₹${parseFloat(product.Mrp || product.mrp || 0).toFixed(2)}`,
-        'Expiry': product.Expiry || product.expiry || product.EXPIRY || "N/A",
-        'Pack': product.Pack || product.pack || "N/A",
-        'Quantity': product.quantity || 0,
-        'Free Quantity': product.freequantity || 0,
-        'Scanned Quantity': product.scanned_quantity || 0,
-        'Vno': product.Vno,
-        'Status': product.status === 'verified' ? 'Verified' : 'Failed',
-        'Failure Reason': product.failureReason || (product.status === 'failed' ? 'General' : 'N/A'),
-        'Similarity': product.similarity ? `${(product.similarity * 100).toFixed(2)}%` : "N/A",
-        'Mismatches': product.mismatches ? JSON.stringify(product.mismatches) : "N/A",
-        'Message': product.message || "N/A",
-        'Source': product.source || "N/A"
+      // Format data according to the required API structure
+      const reportData = exportProducts.map(product => {
+        // Find the original CSV product to get all the required fields
+        const csvProduct = products.find(p =>
+          (p.item_code || p.item || p.code) === (product.item || product.item_code || product.code) &&
+          p.source === 'csv'
+        );
 
-      }));
+        // Helper function to convert values to proper types
+        const getNumericValue = (value, defaultValue = 0) => {
+          if (value === undefined || value === null || value === "N/A") return defaultValue;
+          const num = parseFloat(value);
+          return isNaN(num) ? defaultValue : num;
+        };
 
-      // Create workbook and worksheet
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(excelData);
+        // Helper function to get string values
+        const getStringValue = (value, defaultValue = "N/A") => {
+          if (value === undefined || value === null) return defaultValue;
+          return String(value);
+        };
 
-      // Add worksheet to workbook
-      XLSX.utils.book_append_sheet(wb, ws, "All Products");
+        // Use CSV data as base, then override with scanned product data where available
+        return {
+          BillNo: getStringValue(csvProduct?.['Bill No'] || csvProduct?.BillNo || product.BillNo),
+          CGST: getNumericValue(csvProduct?.CGST || product.CGST || product.cgst),
+          Discount: getNumericValue(csvProduct?.DIS || csvProduct?.Discount || product.Discount || product.DIS || product.discount),
+          Expiry: getStringValue(product.Expiry || product.expiry || product.EXPIRY || csvProduct?.Expiry),
+          FTrate: getNumericValue(csvProduct?.FTRate || csvProduct?.FTrate || product.FTrate || product.FTrate || product.ftrate),
+          HSNCode: getStringValue(csvProduct?.HSNCODE || product.HSNCODE || product.HSNCode),
+          IGST: getNumericValue(csvProduct?.IGST || product.IGST || product.igst),
+          SGST: getNumericValue(csvProduct?.SGST || product.SGST || product.sgst),
+          SRate: getNumericValue(csvProduct?.SRate || product.SRate || product.Srate || product.srate),
+          Scm1: getNumericValue(csvProduct?.Scm1 || product.Scm1 || product.scm1),
+          Scm2: getNumericValue(csvProduct?.Scm2 || product.Scm2 || product.scm2),
+          ScmPer: getNumericValue(csvProduct?.ScmPer || product.ScmPer || product.scmPer || product.SCMPer),
+          batch: getStringValue(product.Batch || product.batch || csvProduct?.batch),
+          freequantity: getNumericValue(product.freequantity || csvProduct?.freequantity),
+          item: getStringValue(product.item || product.item_code || product.code || csvProduct?.item),
+          mrp: getNumericValue(product.Mrp || product.mrp || csvProduct?.mrp),
+          name: getStringValue(product.name || csvProduct?.name, "Unknown Product"),
+          pack: getStringValue(product.Pack || product.pack || csvProduct?.pack),
+          quantity: getNumericValue(product.quantity || csvProduct?.quantity),
+          SuppCode: getStringValue(csvProduct?.SuppCode || product.SuppCode || product.suppCode || selectedCustomer?.VCode || "N/A"),
+        };
+      });
 
-      // Generate Excel file and trigger download
-      const fileName = `product_verification_${new Date().toISOString().split('T')[0]}.xlsx`;
-      XLSX.writeFile(wb, fileName);
+      console.log("Report data to be sent:", reportData);
+
+      // Try sending the data as a direct array first
+      try {
+        const response = await axios.post(
+          'http://jemapps.in/api/ocr/generate-easysol-report',
+          reportData,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            responseType: 'blob'
+          }
+        );
+
+        // Handle successful response - check if it's CSV
+        const contentType = response.headers['content-type'];
+        const blob = new Blob([response.data], { type: contentType });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+
+        const date = new Date().toISOString().split('T')[0];
+        
+        // Determine file extension based on content type
+        const fileExtension = contentType.includes('csv') ? 'csv' : 'xlsx';
+        a.download = `easysol-report-${date}.${fileExtension}`;
+
+        document.body.appendChild(a);
+        a.click();
+
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        console.log('Report exported successfully');
+
+      } catch (arrayError) {
+        // If array format fails, try with dataArray wrapper
+        console.log('Array format failed, trying with dataArray wrapper...');
+
+        const response = await axios.post(
+          'http://jemapps.in/api/ocr/generate-easysol-report',
+          { dataArray: reportData },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            responseType: 'blob'
+          }
+        );
+
+        // Handle successful response - check if it's CSV
+        const contentType = response.headers['content-type'];
+        const blob = new Blob([response.data], { type: contentType });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+
+        const date = new Date().toISOString().split('T')[0];
+        
+        // Determine file extension based on content type
+        const fileExtension = contentType.includes('csv') ? 'csv' : 'xlsx';
+        a.download = `easysol-report-${date}.${fileExtension}`;
+
+        document.body.appendChild(a);
+        a.click();
+
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        console.log('Report exported successfully with dataArray wrapper');
+      }
 
     } catch (err) {
-      console.error("Error generating Excel file:", err);
-      setError("Failed to generate Excel file");
-      setShowErrorPopup(true);
-    }
-  }, [products]);
+      console.error("Error exporting report:", err);
 
-  // Export report to server API
-const exportReportToServer = useCallback(async () => {
-  try {
-    setIsExporting(true);
-
-    // Filter verified and failed products (exclude not_uploaded)
-    const exportProducts = products.filter(product =>
-      product.status === 'verified' || product.status === 'failed'
-    );
-
-    if (exportProducts.length === 0) {
-      setError("No products to export");
-      setShowErrorPopup(true);
-      setIsExporting(false);
-      return;
-    }
-
-    // Format data according to the required API structure
-    const reportData = exportProducts.map(product => {
-      // Find the original CSV product to get all the required fields
-      const csvProduct = products.find(p =>
-        (p.item_code || p.item || p.code) === (product.item || product.item_code || product.code) &&
-        p.source === 'csv'
-      );
-
-      // Helper function to convert values to proper types
-      const getNumericValue = (value, defaultValue = 0) => {
-        if (value === undefined || value === null || value === "N/A") return defaultValue;
-        const num = parseFloat(value);
-        return isNaN(num) ? defaultValue : num;
-      };
-
-      // Helper function to get string values
-      const getStringValue = (value, defaultValue = "N/A") => {
-        if (value === undefined || value === null) return defaultValue;
-        return String(value);
-      };
-
-      // Use CSV data as base, then override with scanned product data where available
-      return {
-        BillNo: getStringValue(csvProduct?.['Bill No'] || csvProduct?.BillNo || product.BillNo),
-        CGST: getNumericValue(csvProduct?.CGST || product.CGST || product.cgst),
-        Discount: getNumericValue(csvProduct?.DIS || csvProduct?.Discount || product.Discount || product.DIS || product.discount),
-        Expiry: getStringValue(product.Expiry || product.expiry || product.EXPIRY || csvProduct?.Expiry),
-        FTrate: getNumericValue(csvProduct?.FTRate || csvProduct?.FTrate || product.FTrate || product.FTrate || product.ftrate),
-        HSNCode: getStringValue(csvProduct?.HSNCODE || product.HSNCODE || product.HSNCode),
-        IGST: getNumericValue(csvProduct?.IGST || product.IGST || product.igst),
-        SGST: getNumericValue(csvProduct?.SGST || product.SGST || product.sgst),
-        SRate: getNumericValue(csvProduct?.SRate || product.SRate || product.Srate || product.srate),
-        Scm1: getNumericValue(csvProduct?.Scm1 || product.Scm1 || product.scm1),
-        Scm2: getNumericValue(csvProduct?.Scm2 || product.Scm2 || product.scm2),
-        ScmPer: getNumericValue(csvProduct?.ScmPer || product.ScmPer || product.scmPer || product.SCMPer),
-        batch: getStringValue(product.Batch || product.batch || csvProduct?.batch),
-        freequantity: getNumericValue(product.freequantity || csvProduct?.freequantity),
-        item: getStringValue(product.item || product.item_code || product.code || csvProduct?.item),
-        mrp: getNumericValue(product.Mrp || product.mrp || csvProduct?.mrp),
-        name: getStringValue(product.name || csvProduct?.name, "Unknown Product"),
-        pack: getStringValue(product.Pack || product.pack || csvProduct?.pack),
-        quantity: getNumericValue(product.quantity || csvProduct?.quantity),
-        SuppCode: getStringValue(csvProduct?.SuppCode || product.SuppCode || product.suppCode || selectedCustomer?.VCode || "N/A"),
-      };
-    });
-
-    console.log("Report data to be sent:", reportData);
-
-    // Try sending the data as a direct array first
-    try {
-      const response = await axios.post(
-        'http://jemapps.in/api/ocr/generate-easysol-report',
-        reportData,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          responseType: 'blob'
+      let errorMessage = "Failed to export report: ";
+      if (err.response) {
+        if (err.response.data instanceof Blob) {
+          const blobText = await err.response.data.text();
+          try {
+            const errorData = JSON.parse(blobText);
+            errorMessage += errorData.message || `Server error ${err.response.status}`;
+          } catch {
+            errorMessage += `Server error ${err.response.status}`;
+          }
+        } else {
+          errorMessage += err.response.data.message || `Server error ${err.response.status}`;
         }
-      );
-
-      // Handle successful response
-      const blob = new Blob([response.data], { type: response.headers['content-type'] });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-
-      const date = new Date().toISOString().split('T')[0];
-      a.download = `easysol-report-${date}.xlsx`;
-
-      document.body.appendChild(a);
-      a.click();
-
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-
-      console.log('Report exported successfully');
-
-    } catch (arrayError) {
-      // If array format fails, try with dataArray wrapper
-      console.log('Array format failed, trying with dataArray wrapper...');
-
-      const response = await axios.post(
-        'http://jemapps.in/api/ocr/generate-easysol-report',
-        { dataArray: reportData },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          responseType: 'blob'
-        }
-      );
-
-      const blob = new Blob([response.data], { type: response.headers['content-type'] });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-
-      const date = new Date().toISOString().split('T')[0];
-      a.download = `easysol-report-${date}.xlsx`;
-
-      document.body.appendChild(a);
-      a.click();
-
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-
-      console.log('Report exported successfully with dataArray wrapper');
-    }
-
-  } catch (err) {
-    console.error("Error exporting report:", err);
-
-    let errorMessage = "Failed to export report: ";
-    if (err.response) {
-      if (err.response.data instanceof Blob) {
-        const blobText = await err.response.data.text();
-        try {
-          const errorData = JSON.parse(blobText);
-          errorMessage += errorData.message || `Server error ${err.response.status}`;
-        } catch {
-          errorMessage += `Server error ${err.response.status}`;
-        }
+      } else if (err.request) {
+        errorMessage += "No response from server";
       } else {
-        errorMessage += err.response.data.message || `Server error ${err.response.status}`;
+        errorMessage += err.message;
       }
-    } else if (err.request) {
-      errorMessage += "No response from server";
-    } else {
-      errorMessage += err.message;
-    }
 
-    setError(errorMessage);
-    setShowErrorPopup(true);
-  } finally {
-    setIsExporting(false);
-  }
-}, [products, selectedCustomer]);
+      setError(errorMessage);
+      setShowErrorPopup(true);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [products, selectedCustomer]);
+
   // Sorting logic
   const sortedProducts = React.useMemo(() => {
     let productsToSort = [...products];
@@ -714,14 +685,6 @@ const exportReportToServer = useCallback(async () => {
             </p>
           </div>
           <div className="flex items-center space-x-4">
-            <button
-              onClick={downloadExcel}
-              className="flex items-center bg-green-600 text-white px-3 py-2 rounded-md hover:bg-green-700 transition-colors"
-              title="Download all products as Excel"
-            >
-              <FaFileExcel className="mr-2" />
-              Export Excel
-            </button>
             <button
               onClick={exportReportToServer}
               disabled={isExporting}

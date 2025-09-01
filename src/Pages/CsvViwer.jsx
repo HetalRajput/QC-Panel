@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FaFileUpload, FaFileDownload, FaExchangeAlt, FaChevronLeft, FaChevronRight, FaTimes, FaCheck, FaSearch } from 'react-icons/fa';
+import { FaFileUpload, FaFileDownload, FaExchangeAlt, FaChevronLeft, FaChevronRight, FaTimes, FaCheck, FaSearch, FaSignOutAlt } from 'react-icons/fa';
 import FieldMapper from '../Component/Csv-uploader/FieldMapper';
 import MatchResults from '../Component/Csv-uploader/MatchResult';
 
@@ -15,13 +15,15 @@ function CsvViewer() {
   const [error, setError] = useState(null);
   const [apiResults, setApiResults] = useState([]);
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const fixedFields = ['item', 'name', 'batch', 'mrp', 'pack', 'Expiry', 'quantity', 'freequantity', 'Vno', 'CGST', 'SGST', 'IGST', 'HSNCODE', 'FTRate', 'SRate', 'DIS', 'Scm1', 'Scm2', 'ScmPer'];
+  const fixedFields = ['item', 'name', 'batch', 'mrp', 'pack', 'Expiry', 'quantity', 'freequantity', 'BillNo', 'CGST', 'SGST', 'IGST', 'HSNCODE', 'FTRate', 'SRate', 'DIS', 'Scm1', 'Scm2', 'ScmPer'];
   // Search functionality states
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  // Logout state
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   const processFile = (file) => {
     setError(null);
@@ -155,10 +157,14 @@ function CsvViewer() {
         const mappedRow = {};
         fixedFields.forEach(fixedField => {
           const csvField = fieldMap[fixedField];
-          // Handle quantity field specifically to ensure it's a number
-          if (fixedField === 'quantity' || fixedField === 'freequantity' || fixedField === 'Vno' || fixedField === 'CGST' || fixedField === 'SGST' || fixedField === 'IGST' || fixedField === 'FTRate' || fixedField === 'SRate' || fixedField === 'DIS' || fixedField === 'Scm1' || fixedField === 'Scm2' || fixedField === 'ScmPer') {
+          // Handle only truly numeric fields specifically - REMOVED BillNo from this list
+          if (fixedField === 'quantity' || fixedField === 'freequantity' || 
+              fixedField === 'CGST' || fixedField === 'SGST' || fixedField === 'IGST' || 
+              fixedField === 'FTRate' || fixedField === 'SRate' || fixedField === 'DIS' || 
+              fixedField === 'Scm1' || fixedField === 'Scm2' || fixedField === 'ScmPer') {
             mappedRow[fixedField] = csvField ? (parseInt(row[csvField]) || 0) : 0;
           } else {
+            // For all other fields including BillNo, keep as string
             mappedRow[fixedField] = csvField ? (row[csvField] || '') : '';
           }
         });
@@ -220,8 +226,52 @@ function CsvViewer() {
     }
   };
 
+  // Logout functions
+  const handleLogout = () => {
+    setShowLogoutConfirm(true);
+  };
+
+  const confirmLogout = () => {
+    // Remove token from localStorage
+    localStorage.removeItem('token');
+    
+    // Redirect to login page or reload the application
+    window.location.href = '/login'; // Adjust the path as needed for your application
+    
+    // If you don't have a login route, you can reload the page
+    // window.location.reload();
+  };
+
+  const cancelLogout = () => {
+    setShowLogoutConfirm(false);
+  };
+
   return (
     <div className="flex h-screen bg-gray-100">
+      {/* Logout Confirmation Popup */}
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold mb-4">Confirm Logout</h3>
+            <p className="mb-6">Are you sure you want to logout?</p>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={cancelLogout}
+                className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmLogout}
+                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Left Sidebar - Collapsible */}
       <div className={`relative ${isCollapsed ? 'w-12' : 'w-1/4'} bg-white shadow-md transition-all duration-300`}>
         {/* Collapse/Expand Button */}
@@ -234,6 +284,19 @@ function CsvViewer() {
 
         {!isCollapsed ? (
           <div className="p-4 overflow-y-auto">
+            {/* Header with Logout Button */}
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-gray-800">CSV Processor</h2>
+              <button
+                onClick={handleLogout}
+                className="flex items-center text-red-600 hover:text-red-800"
+                title="Logout"
+              >
+                <FaSignOutAlt className="mr-1" />
+                <span>Logout</span>
+              </button>
+            </div>
+
             {/* Search Section */}
             <div className="mb-6">
               <h3 className="text-lg font-semibold mb-2">Supplier Search</h3>
@@ -284,7 +347,7 @@ function CsvViewer() {
               )}
             </div>
 
-            {/* Rest of your existing code remains the same */}
+            {/* CSV Upload Section */}
             <div className="mb-6">
               <h3 className="text-lg font-semibold mb-2">CSV Upload</h3>
               <div
@@ -412,6 +475,14 @@ function CsvViewer() {
               className="hidden"
               id="csv-upload"
             />
+            {/* Mini Logout Button in Collapsed Mode */}
+            <button
+              onClick={handleLogout}
+              className="mt-4 text-red-600 hover:text-red-800"
+              title="Logout"
+            >
+              <FaSignOutAlt />
+            </button>
           </div>
         )}
       </div>
@@ -422,14 +493,6 @@ function CsvViewer() {
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold">Match Results</h3>
             <div className="flex items-center">
-              {mappedData.length > 0 && (
-                <button
-                  className="flex items-center bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600 mr-2"
-                  onClick={handleDownload}
-                >
-                  <FaFileDownload className="mr-1" /> Download
-                </button>
-              )}
               <FaExchangeAlt className="text-gray-500" />
             </div>
           </div>

@@ -12,6 +12,17 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
   const [mappedColumns, setMappedColumns] = useState({});
   const selectRefs = useRef([]);
   const modalRef = useRef(null);
+  const [token, setToken] = useState('');
+
+
+
+  useEffect(() => {
+    const storedToken = localStorage.getItem("token");
+
+    if (storedToken) {
+      setToken(storedToken);
+    }
+  }, []);
 
   // Add Expiry to the fields to display
   const allFields = [...fixedFields];
@@ -29,11 +40,11 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
           const response = await axios.get(
             `http://jemapps.in/api/ocr/get-mapped-column?SuppCode=${SelectedCustomer.VCode}`
           );
-          
+
           if (response.data && typeof response.data === 'object') {
             setMappedColumns(response.data);
             console.log('Fetched mapped columns:', response.data);
-            
+
             // Create a mapping between the API response fields and our field names
             const fieldNameMapping = {
               'Code': 'item',
@@ -44,7 +55,7 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
               'Expiry': 'Expiry',
               'Quantity': 'quantity',
               'Fquantity': 'freequantity',
-              'Vno': 'Vno',
+              'Vno': 'BillNo',
               'CGST': 'CGST',
               'SGST': 'SGST',
               'IGST': 'IGST',
@@ -65,7 +76,7 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
                 newFieldMap[ourField] = column;
               }
             });
-            
+
             // Update the parent component's fieldMap
             Object.entries(newFieldMap).forEach(([field, column]) => {
               onFieldMapChange(field, column);
@@ -114,7 +125,7 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
       e.preventDefault();
       const options = modalRef.current.querySelectorAll('option');
       const currentIndex = Array.from(options).findIndex(opt => opt.selected);
-      
+
       if (e.key === 'ArrowUp' && currentIndex > 0) {
         options[currentIndex - 1].selected = true;
       } else if (e.key === 'ArrowDown' && currentIndex < options.length - 1) {
@@ -130,14 +141,13 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
   const handleSaveMapping = async () => {
     // First call the original onSaveMapping function
     onSaveMapping();
-    
+
     try {
       setIsLoading(true);
       setApiError(null);
-      
-      // Prepare the data for the insert API call
-      console.log('Field Map before saving >>>>>>>>>>>>>>:', fieldMap);
-      
+
+      console.log('Field Map before saving:', fieldMap);
+
       // Create reverse mapping from our field names to API field names
       const reverseFieldMapping = {
         'item': 'Code',
@@ -148,7 +158,7 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
         'Expiry': 'Expiry',
         'quantity': 'Quantity',
         'freequantity': 'Fquantity',
-        'Vno': 'Vno',
+        'BillNo': 'Vno',
         'CGST': 'CGST',
         'SGST': 'SGST',
         'IGST': 'IGST',
@@ -162,7 +172,7 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
       };
 
       const mappingData = { SuppCode: SelectedCustomer?.VCode || "" };
-   
+
       // Map all fields to the API format
       Object.entries(fieldMap).forEach(([ourField, column]) => {
         const apiField = reverseFieldMapping[ourField];
@@ -171,8 +181,8 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
         }
       });
 
-      console.log('Saving mapping data<<<<<<<<<<<<<<<<<:', mappingData);
-      
+      console.log('Saving mapping data:', mappingData);
+
       // Call the insert API
       const response = await axios.post(
         'http://jemapps.in/api/ocr/insert-map-csv-column',
@@ -183,45 +193,61 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
           }
         }
       );
-      
+
       setApiResponse(response.data);
       console.log('Mapping saved successfully:', response.data);
 
       // Also send the processed data to the other endpoint
       const apiData = csvData.map(item => {
-        // Get the mapped field names from fieldMap with fallbacks
-        const itemCodeField = fieldMap['item'] || 'code';
-        const nameField = fieldMap['name'] || 'item name';
-        const mrpField = fieldMap['mrp'] || 'mrp';
-        const batchField = fieldMap['batch'] || 'batch';
-        const packField = fieldMap['pack'] || 'pack';
-        const expiryField = fieldMap['Expiry'] || 'EXPIRY';
+        // Get the mapped field names from fieldMap
+        const itemCodeField = fieldMap['item'];
+        const nameField = fieldMap['name'];
+        const mrpField = fieldMap['mrp'];
+        const batchField = fieldMap['batch'];
+        const packField = fieldMap['pack'];
+        const expiryField = fieldMap['Expiry'];
+        const billNoField = fieldMap['BillNo']; // Add BillNo field mapping
 
-        // Convert field names to lowercase for case-insensitive matching
-        const lowerCaseItem = Object.fromEntries(
-          Object.entries(item).map(([key, value]) => [key.toLowerCase(), value])
-        );
+        // Find the actual field name in the CSV data (case-insensitive)
+        const findField = (fieldName) => {
+          if (!fieldName) return null;
+
+          const lowerFieldName = fieldName.toLowerCase();
+          return Object.keys(item).find(key =>
+            key.toLowerCase() === lowerFieldName
+          );
+        };
+
+        // Get values using the actual field names
+        const getValue = (fieldName) => {
+          const actualField = findField(fieldName);
+          return actualField ? item[actualField] : '';
+        };
 
         return {
-          item_code: lowerCaseItem[itemCodeField.toLowerCase()] || '',
-          name: lowerCaseItem[nameField.toLowerCase()] || '',
-          Mrp: parseFloat(lowerCaseItem[mrpField.toLowerCase()]) || 0,
-          Batch: lowerCaseItem[batchField.toLowerCase()] || '',
-          Pack: lowerCaseItem[packField.toLowerCase()] || '',
-          Expiry: lowerCaseItem[expiryField.toLowerCase()] || 'N/A'
+          item_code: getValue(itemCodeField) || '',
+          name: getValue(nameField) || '',
+          Mrp: parseFloat(getValue(mrpField)) || 0,
+          Batch: getValue(batchField) || '',
+          Pack: getValue(packField) || '',
+          Expiry: getValue(expiryField) || 'N/A',
+          BillNo: getValue(billNoField) || '' // Include BillNo in the processed data
         };
       });
 
+      console.log('Processed data for API:', apiData);
+
       const processResponse = await axios.post(
-        'http://192.168.1.110:6500/api/ocr/process_json', 
+        'http://192.168.1.110:6500/api/ocr/process_json',
         apiData,
         {
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem("token")}`
           }
         }
       );
-      
+
       console.log('Data processed successfully:', processResponse.data);
 
     } catch (error) {
@@ -235,7 +261,7 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
   return (
     <div className="space-y-6">
       <h3 className="text-xl font-semibold text-gray-800">Map CSV Fields</h3>
-      
+
       <div className="space-y-4">
         {allFields.map((field, index) => (
           <div key={field} className="flex items-center justify-between">
@@ -258,16 +284,16 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
                 ))}
               </select>
               <div className="absolute right-2 top-2 flex flex-col">
-                <button 
+                <button
                   onClick={() => index > 0 && selectRefs.current[index - 1].focus()}
                   className="text-gray-500 hover:text-gray-700"
                 >
                 </button>
-                <button 
+                <button
                   onClick={() => index < allFields.length - 1 && selectRefs.current[index + 1].focus()}
                   className="text-gray-500 hover:text-gray-700"
                 >
-                  
+
                 </button>
               </div>
             </div>
@@ -276,11 +302,11 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
       </div>
 
       {showModal && (
-        <div 
+        <div
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
           onClick={() => setShowModal(false)}
         >
-          <div 
+          <div
             ref={modalRef}
             className="bg-white p-6 rounded-lg shadow-lg w-96"
             onClick={(e) => e.stopPropagation()}
@@ -304,13 +330,13 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
               ))}
             </select>
             <div className="flex justify-between">
-              <button 
+              <button
                 className="px-4 py-2 bg-gray-200 rounded-md hover:bg-gray-300"
                 onClick={() => setShowModal(false)}
               >
                 Cancel
               </button>
-              <button 
+              <button
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
                 onClick={() => {
                   const select = modalRef.current.querySelector('select');
