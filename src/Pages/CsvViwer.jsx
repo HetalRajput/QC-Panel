@@ -15,7 +15,7 @@ function CsvViewer() {
   const [error, setError] = useState(null);
   const [apiResults, setApiResults] = useState([]);
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const fixedFields = ['item', 'name', 'batch', 'mrp', 'pack', 'Expiry', 'quantity', 'freequantity', 'BillNo', 'CGST', 'SGST', 'IGST', 'HSNCODE', 'FTRate', 'SRate', 'DIS', 'Scm1', 'Scm2', 'ScmPer'];
+  const fixedFields = ['item', 'name', 'batch', 'mrp', 'pack', 'Expiry', 'quantity', 'freequantity', 'BillNo', 'CGST', 'SGST', 'IGST', 'HSNCODE', 'FTRate', 'SRate', 'DIS', 'Scm1', 'Scm2', 'ScmPer','Barcode','BillDate','EOC','EOR','EXCISE','HALFP','TAX'];
   // Search functionality states
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -150,7 +150,7 @@ function CsvViewer() {
 
       if (missingFields.length > 0) {
         setError(`Please map these required fields: ${missingFields.join(', ')}`);
-        return;
+        return; 
       }
 
       const newData = csvData.map(row => {
@@ -161,7 +161,8 @@ function CsvViewer() {
           if (fixedField === 'quantity' || fixedField === 'freequantity' || 
               fixedField === 'CGST' || fixedField === 'SGST' || fixedField === 'IGST' || 
               fixedField === 'FTRate' || fixedField === 'SRate' || fixedField === 'DIS' || 
-              fixedField === 'Scm1' || fixedField === 'Scm2' || fixedField === 'ScmPer') {
+              fixedField === 'Scm1' || fixedField === 'Scm2' || fixedField === 'ScmPer' ||
+              fixedField === 'Barcode' || fixedField === 'BillDate' || fixedField === 'HALFP') {
             mappedRow[fixedField] = csvField ? (parseInt(row[csvField]) || 0) : 0;
           } else {
             // For all other fields including BillNo, keep as string

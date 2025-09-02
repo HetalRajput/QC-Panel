@@ -6,6 +6,11 @@ import { initializeSocket, getSocket, disconnectSocket } from '../../Utility/Con
 
 const VerifyListener = ({ csvData, selectedCustomer }) => {
 
+
+    console.log("CSV Data >>>>>>> :", csvData);
+    
+
+
   // State management
   const [connectionStatus, setConnectionStatus] = useState("disconnected");
   const [products, setProducts] = useState([]); // Combined products

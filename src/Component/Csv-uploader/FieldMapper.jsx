@@ -65,7 +65,14 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
               'DIS': 'DIS',
               'Scm1': 'Scm1',
               'Scm2': 'Scm2',
-              'ScmPer': 'ScmPer'
+              'ScmPer': 'ScmPer',
+              'Barcode': 'Barcode',
+              'BillDate': 'BillDate',
+              'EOC': "EOC",
+              'EOR': "EOR",
+              'EXCISE': "EXCISE",
+              'HALFP': "HALFP",
+              'TAX': "TAX"
             };
 
             // Apply the mapped columns to the fieldMap
@@ -168,7 +175,14 @@ function FieldMapper({ csvHeaders, fixedFields, fieldMap, onFieldMapChange, onSa
         'DIS': 'DIS',
         'Scm1': 'Scm1',
         'Scm2': 'Scm2',
-        'ScmPer': 'ScmPer'
+        'ScmPer': 'ScmPer',
+        'Barcode': 'Barcode',
+        'BillDate': 'BillDate',
+        'EOC': "EOC",
+        'EOR': "EOR",
+        'EXCISE': "EXCISE",
+        'HALFP': "HALFP",
+        'TAX': "TAX"
       };
 
       const mappingData = { SuppCode: SelectedCustomer?.VCode || "" };
